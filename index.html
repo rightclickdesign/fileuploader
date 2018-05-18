@@ -18,7 +18,7 @@ limitations under the License.
 <head>
   <meta charset=utf-8 />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Firebase SDK for Cloud Storage Quickstart</title>
+  <title>RCD Fileuploader</title>
 
   <!-- Material Design Theming -->
   <link rel="stylesheet" href="https://code.getmdl.io/1.1.3/material.orange-indigo.min.css">
@@ -26,6 +26,7 @@ limitations under the License.
   <script defer src="https://code.getmdl.io/1.1.3/material.min.js"></script>
 
   <link rel="stylesheet" href="main.css">
+  <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
 </head>
 <body>
   <div class="demo-layout mdl-layout mdl-js-layout mdl-layout--fixed-header">
@@ -34,7 +35,7 @@ limitations under the License.
     <header class="mdl-layout__header mdl-color-text--white mdl-color--light-blue-700">
       <div class="mdl-cell mdl-cell--12-col mdl-cell--12-col-tablet mdl-grid">
         <div class="mdl-layout__header-row mdl-cell mdl-cell--12-col mdl-cell--12-col-tablet mdl-cell--8-col-desktop">
-          <h3>Firebase SDK for Cloud Storage Quickstart</h3>
+          <h3>RCD Fileuploader</h3>
         </div>
       </div>
     </header>
@@ -55,6 +56,17 @@ limitations under the License.
             <span id="linkbox"></span>
           </div>
         </div>
+
+
+        <!-- Container for the demo -->
+        <div class="mdl-card mdl-shadow--2dp mdl-cell mdl-cell--12-col mdl-cell--12-col-tablet mdl-cell--12-col-desktop">
+          <div class="mdl-card__title mdl-color--light-blue-600 mdl-color-text--white">
+            <h2 class="mdl-card__title-text">Files</h2>
+          </div>
+          <div class="mdl-card__supporting-text mdl-color-text--grey-600">
+            <div id="image-list"></div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -62,14 +74,68 @@ limitations under the License.
   <!-- Import and configure the Firebase SDK -->
   <!-- These scripts are made available when the app is served or deployed on Firebase Hosting -->
   <!-- If you do not serve/host your project using Firebase Hosting see https://firebase.google.com/docs/web/setup -->
+  <script src="/__/firebase/5.0.0/firebase.js"></script>
   <script src="/__/firebase/5.0.0/firebase-app.js"></script>
   <script src="/__/firebase/5.0.0/firebase-auth.js"></script>
   <script src="/__/firebase/5.0.0/firebase-storage.js"></script>
+  <script src="/__/firebase/5.0.0/firebase-firestore.js"></script>
   <script src="/__/firebase/init.js"></script>
 
   <script>
     var auth = firebase.auth();
     var storageRef = firebase.storage().ref();
+
+    const settings = { timestampsInSnapshots: true };
+    var db = firebase.firestore();
+    db.settings(settings);
+    var imageColRef = db.collection('images');
+
+    var imageListDiv = document.getElementById('image-list');
+
+    function arrToUl(root, arr) {
+      var ul = document.createElement('ul');
+      ul.setAttribute('id', 'image-list-ul');
+      var li;
+      
+      root.appendChild(ul); // append the created ul to the root
+    
+      arr.forEach(function(item) {
+        if (Array.isArray(item)) { // if it's an array
+          arrToUl(li, item); // call arrToUl with the li as the root
+          return;
+        }
+        
+        li = document.createElement('li'); // create a new list item
+
+        var a = document.createElement('a');
+        var linkText = document.createTextNode(item.name);
+        a.appendChild(linkText);
+        a.title = item.name;
+        a.href = item.url;
+        a.setAttribute('target', '_blank');
+
+        li.appendChild(a); // append the text to the li
+        ul.insertBefore(li, ul.childNodes[0]); // add the list item to the top of ul
+      });
+    }
+
+    function appendItemToUl(item) {
+      var ul = document.getElementById('image-list-ul');
+      var li;
+
+      li = document.createElement('li'); // create a new list item
+
+      var a = document.createElement('a');
+      var linkText = document.createTextNode(item.name);
+      a.appendChild(linkText);
+      a.title = item.name;
+      a.href = item.url;
+      a.setAttribute('target', '_blank');
+
+      li.appendChild(a); // append the text to the li
+      ul.insertBefore(li, ul.childNodes[0]); // add the list item to the top of ul
+      // ul.appendChild(li); // append the list item to the ul      
+    }
 
     function handleFileSelect(evt) {
       evt.stopPropagation();
@@ -82,15 +148,28 @@ limitations under the License.
 
       // Push to child path.
       // [START oncomplete]
-      storageRef.child('images/' + file.name).put(file, metadata).then(function(snapshot) {
+      storageRef.child('images/' + 'img-' + (new Date).getTime() + '-' + file.name).put(file, metadata).then(function(snapshot) {
         console.log('Uploaded', snapshot.totalBytes, 'bytes.');
         console.log('File metadata:', snapshot.metadata);
         // Let's get a download URL for the file.
         snapshot.ref.getDownloadURL().then(function(url) {
           console.log('File available at', url);
           // [START_EXCLUDE]
-          document.getElementById('linkbox').innerHTML = '<a href="' +  url + '">Click For File</a>';
+          document.getElementById('linkbox').innerHTML = '<a target="_blank" href="' +  url + '">Click For File</a>';
           // [END_EXCLUDE]
+
+          imageColRef.add({
+            url: url, 
+            name: file.name, 
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          }).then(function(docRef) {
+            console.log('Document written with ID: ', docRef.id);
+
+            appendItemToUl({ name: file.name, url: url });
+
+          }).catch(function(error) {
+              console.error('Error adding document: ', error);
+          });
         });
       }).catch(function(error) {
         // [START onfailure]
@@ -108,6 +187,14 @@ limitations under the License.
         if (user) {
           console.log('Anonymous user signed-in.', user);
           document.getElementById('file').disabled = false;
+
+          imageColRef.orderBy('createdAt', 'asc').get().then(snapshot => {
+            arrToUl(imageListDiv, snapshot.docs.map(doc => {
+              // console.log('doc:', doc.data());
+              return doc.data();
+            }));
+          });
+
         } else {
           console.log('There was no anonymous session. Creating a new anonymous user.');
           // Sign the user in anonymously since accessing Storage requires the user to be authorized.
